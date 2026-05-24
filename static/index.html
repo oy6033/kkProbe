@@ -1053,6 +1053,43 @@
           .filter(Boolean);
       }
 
+      function sampleFromResult(result) {
+        if (!result || result.t === undefined) return null;
+        return {
+          t: result.t,
+          latency_ms: result.latency_ms ?? null,
+          ok: Boolean(result.ok),
+          error: result.error || "",
+        };
+      }
+
+      function mergeLiveSnapshot(liveData) {
+        if (!state.data) {
+          state.data = liveData;
+          return;
+        }
+        const existingNodes = new Map(
+          (state.data.nodes || []).map((nodeWrap) => [nodeWrap.node?.id, nodeWrap])
+        );
+        const cutoff = (liveData.generated_at || Date.now()) - 24 * 60 * 60 * 1000;
+        const nodes = (liveData.nodes || []).map((liveWrap) => {
+          const nodeId = liveWrap.node?.id;
+          const existing = existingNodes.get(nodeId) || {};
+          const mergedResults = { ...(existing.results || {}) };
+          Object.entries(liveWrap.results || {}).forEach(([targetId, result]) => {
+            const previous = mergedResults[targetId] || {};
+            const series = [...(previous.series || [])].filter((point) => point.t >= cutoff);
+            const sample = sampleFromResult(result);
+            if (sample && !series.some((point) => point.t === sample.t)) {
+              series.push(sample);
+            }
+            mergedResults[targetId] = { ...previous, ...result, series };
+          });
+          return { ...existing, ...liveWrap, results: mergedResults };
+        });
+        state.data = { ...state.data, ...liveData, nodes };
+      }
+
       function updateTargetSelect(targets) {
         const current = state.selectedTarget;
         const button = $("targetSelectButton");
@@ -1359,10 +1396,17 @@
         drawChart();
       }
 
-      async function loadSnapshot() {
+      async function loadSnapshot(options = {}) {
+        const includeHistory = options.history !== false;
         const selectedTargetVersion = state.selectedTargetVersion;
-        const response = await fetch("/api/snapshot", { cache: "no-store" });
-        state.data = await response.json();
+        const path = includeHistory ? "/api/snapshot" : "/api/snapshot?history=0";
+        const response = await fetch(path, { cache: "no-store" });
+        const snapshot = await response.json();
+        if (includeHistory) {
+          state.data = snapshot;
+        } else {
+          mergeLiveSnapshot(snapshot);
+        }
         if (!state.savingSelectedTarget && selectedTargetVersion === state.selectedTargetVersion) {
           state.selectedTarget = state.data.selected_target || ALL_TARGETS;
         }
@@ -1634,7 +1678,8 @@
       setInterval(setClock, 1000);
       initAuth();
       loadSnapshot();
-      setInterval(loadSnapshot, 3000);
+      setInterval(() => loadSnapshot({ history: false }), 3000);
+      setInterval(loadSnapshot, 300000);
     </script>
   </body>
 </html>

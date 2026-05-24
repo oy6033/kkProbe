@@ -10,7 +10,7 @@ import time
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 
 APP_DIR = Path(__file__).resolve().parent
@@ -77,6 +77,20 @@ def network_snapshot():
         }
         STATE["network"] = current
         return dict(current)
+
+
+def should_include_history(parsed):
+    params = parse_qs(parsed.query)
+    return (params.get("history") or ["1"])[-1] != "0"
+
+
+def strip_result_history(results):
+    stripped = {}
+    for target_id_value, result in results.items():
+        item = dict(result)
+        item.pop("series", None)
+        stripped[target_id_value] = item
+    return stripped
 
 
 def load_config():
@@ -427,10 +441,12 @@ def probe_target(target):
     return ping_latency(target["host"], timeout=max(1, int(timeout)))
 
 
-def local_snapshot():
+def local_snapshot(include_history=True):
     config = load_config()
     with STATE_LOCK:
         results = json.loads(json.dumps(STATE["results"]))
+    if not include_history:
+        results = strip_result_history(results)
     return {
         "node": {
             "id": config.get("node_id", "local"),
@@ -446,11 +462,12 @@ def local_snapshot():
     }
 
 
-def fetch_remote_node(node):
+def fetch_remote_node(node, include_history=True):
     base = node.get("url", "").rstrip("/")
     if not base:
         raise ValueError("missing url")
-    with urllib.request.urlopen(base + "/api/local", timeout=3) as response:
+    path = "/api/local" if include_history else "/api/local?history=0"
+    with urllib.request.urlopen(base + path, timeout=3) as response:
         data = json.loads(response.read().decode("utf-8"))
     data.setdefault("node", {})
     data["node"]["id"] = node.get("id") or data["node"].get("id") or node.get("name") or base
@@ -464,12 +481,12 @@ def fetch_remote_node(node):
     return data
 
 
-def combined_snapshot():
+def combined_snapshot(include_history=True):
     config = load_config()
-    snapshots = [local_snapshot()]
+    snapshots = [local_snapshot(include_history=include_history)]
     for node in config.get("remote_nodes", []):
         try:
-            snapshots.append(fetch_remote_node(node))
+            snapshots.append(fetch_remote_node(node, include_history=include_history))
         except Exception as exc:
             snapshots.append(
                 {
@@ -587,9 +604,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
         if parsed.path == "/api/local":
-            return self.send_json(local_snapshot())
+            return self.send_json(local_snapshot(include_history=should_include_history(parsed)))
         if parsed.path == "/api/snapshot":
-            return self.send_json(combined_snapshot())
+            return self.send_json(combined_snapshot(include_history=should_include_history(parsed)))
         if parsed.path == "/api/config":
             return self.send_json(public_config(load_config()))
         if parsed.path == "/api/health":
