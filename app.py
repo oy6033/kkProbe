@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 APP_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = Path(os.environ.get("PROBE_CONFIG", APP_DIR / "config.json"))
 STATIC_DIR = APP_DIR / "static"
+ALL_TARGETS = "__all__"
 
 STATE_LOCK = threading.Lock()
 STATE = {
@@ -37,8 +38,10 @@ def load_config():
         "bind_host": "0.0.0.0",
         "port": 8099,
         "admin_token": "",
+        "dashboard_enabled": True,
         "interval_seconds": 5,
-        "history_minutes": 60,
+        "history_minutes": 1440,
+        "selected_target": ALL_TARGETS,
         "targets": [
             {
                 "id": "cloudflare-dns",
@@ -78,7 +81,9 @@ def public_config(config):
         "location": config.get("location", ""),
         "port": config.get("port", 8099),
         "interval_seconds": config.get("interval_seconds", 5),
-        "history_minutes": config.get("history_minutes", 60),
+        "history_minutes": config.get("history_minutes", 1440),
+        "dashboard_enabled": bool(config.get("dashboard_enabled", True)),
+        "selected_target": str(config.get("selected_target") or ALL_TARGETS),
         "targets": sanitize_targets(config.get("targets", [])),
         "remote_nodes": [],
         "admin_enabled": bool(config.get("admin_token")),
@@ -91,9 +96,17 @@ def public_config(config):
     return safe
 
 
+def dashboard_enabled(config):
+    return bool(config.get("dashboard_enabled", True))
+
+
+def normalize_id(raw, fallback="target"):
+    return re.sub(r"[^a-zA-Z0-9_-]+", "-", str(raw).strip().lower()).strip("-") or fallback
+
+
 def target_id(target):
     raw = target.get("id") or target.get("name") or target.get("host") or target.get("url")
-    return re.sub(r"[^a-zA-Z0-9_-]+", "-", str(raw).strip().lower()).strip("-") or "target"
+    return normalize_id(raw)
 
 
 def sanitize_targets(targets):
@@ -105,6 +118,21 @@ def sanitize_targets(targets):
         item.setdefault("kind", "icmp")
         clean.append(item)
     return clean
+
+
+def selected_target_for(config, targets):
+    selected = str(config.get("selected_target") or ALL_TARGETS)
+    if selected == ALL_TARGETS:
+        return ALL_TARGETS
+    target_ids = {target.get("id") for target in targets}
+    return selected if selected in target_ids else ALL_TARGETS
+
+
+def validate_selected_target(payload):
+    raw = str(payload.get("selected_target") or payload.get("target_id") or ALL_TARGETS).strip()
+    if not raw or raw == ALL_TARGETS:
+        return ALL_TARGETS
+    return normalize_id(raw)
 
 
 def validate_remote_node(node):
@@ -128,6 +156,32 @@ def validate_remote_node(node):
         item["admin_token"] = token
     item.pop("token", None)
     return item
+
+
+def validate_node_profile(payload):
+    item = dict(payload)
+    name = str(item.get("name") or item.get("node_name") or "").strip()
+    if not name:
+        raise ValueError("VPS name is required")
+    return {
+        "name": name,
+        "location": str(item.get("location") or "").strip(),
+    }
+
+
+def public_node_profile(config):
+    return {
+        "id": config.get("node_id", "local"),
+        "name": config.get("node_name", socket.gethostname()),
+        "location": config.get("location", ""),
+    }
+
+
+def update_local_node_profile(config, profile):
+    config["node_name"] = profile["name"]
+    config["location"] = profile["location"]
+    save_config(config)
+    return public_node_profile(config)
 
 
 def validate_target(target):
@@ -170,36 +224,102 @@ def upsert_by_id(items, item):
     return result
 
 
-def sync_target_to_remote_nodes(config, target):
+def remove_by_id(items, item_id):
+    return [old for old in items if old.get("id") != item_id]
+
+
+def parse_node_ids(payload):
+    if "node_ids" not in payload:
+        return None
+    node_ids = payload.get("node_ids")
+    if not isinstance(node_ids, list):
+        raise ValueError("node_ids must be a list")
+    clean = {str(item).strip() for item in node_ids if str(item).strip()}
+    if not clean:
+        raise ValueError("select at least one VPS node")
+    return clean
+
+
+def post_remote_json(node, path, body):
+    request = urllib.request.Request(
+        node["url"].rstrip("/") + path,
+        data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=4) as response:
+        response.read()
+
+
+def sync_target_to_remote_nodes(config, target, node_ids=None):
     synced = []
     skipped = []
-    payload = json.dumps(
-        {
-            "admin_token": "",
-            "target": target,
-            "sync": False,
-        },
-        ensure_ascii=False,
-    ).encode("utf-8")
     for node in config.get("remote_nodes", []):
+        node_id = node.get("id")
+        if node_ids is not None and node_id not in node_ids:
+            continue
         token = node.get("admin_token") or ""
         if not token:
-            skipped.append({"id": node.get("id"), "reason": "missing remote token"})
+            skipped.append({"id": node_id, "reason": "missing remote token"})
             continue
-        body = json.loads(payload.decode("utf-8"))
-        body["admin_token"] = token
-        request = urllib.request.Request(
-            node["url"].rstrip("/") + "/api/targets",
-            data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
         try:
-            with urllib.request.urlopen(request, timeout=4) as response:
-                response.read()
-            synced.append({"id": node.get("id"), "ok": True})
+            post_remote_json(
+                node,
+                "/api/targets",
+                {
+                    "admin_token": token,
+                    "target": target,
+                    "sync": False,
+                },
+            )
+            synced.append({"id": node_id, "ok": True, "action": "upsert"})
         except Exception as exc:
-            skipped.append({"id": node.get("id"), "reason": str(exc)[:120]})
+            skipped.append({"id": node_id, "reason": str(exc)[:120]})
+    return synced, skipped
+
+
+def delete_target_from_remote_nodes(config, target_id_value, node_ids=None):
+    synced = []
+    skipped = []
+    for node in config.get("remote_nodes", []):
+        node_id = node.get("id")
+        if node_ids is not None and node_id not in node_ids:
+            continue
+        token = node.get("admin_token") or ""
+        if not token:
+            skipped.append({"id": node_id, "reason": "missing remote token"})
+            continue
+        try:
+            post_remote_json(
+                node,
+                "/api/targets/delete",
+                {
+                    "admin_token": token,
+                    "target_id": target_id_value,
+                },
+            )
+            synced.append({"id": node_id, "ok": True, "action": "delete"})
+        except Exception as exc:
+            skipped.append({"id": node_id, "reason": str(exc)[:120]})
+    return synced, skipped
+
+
+def apply_target_to_node_ids(config, target, node_ids):
+    local_id = str(config.get("node_id", "local"))
+    target_id_value = target["id"]
+    if local_id in node_ids:
+        config["targets"] = upsert_by_id(config.get("targets", []), target)
+    else:
+        config["targets"] = remove_by_id(config.get("targets", []), target_id_value)
+    save_config(config)
+
+    remote_ids = {str(node.get("id")) for node in config.get("remote_nodes", [])}
+    add_ids = node_ids & remote_ids
+    delete_ids = remote_ids - node_ids
+    added, add_skipped = sync_target_to_remote_nodes(config, target, add_ids)
+    deleted, delete_skipped = delete_target_from_remote_nodes(config, target_id_value, delete_ids)
+    synced = added + deleted
+    skipped = add_skipped + delete_skipped
     return synced, skipped
 
 
@@ -283,8 +403,13 @@ def fetch_remote_node(node):
     with urllib.request.urlopen(base + "/api/local", timeout=3) as response:
         data = json.loads(response.read().decode("utf-8"))
     data.setdefault("node", {})
-    data["node"].setdefault("id", node.get("id") or node.get("name") or base)
-    data["node"].setdefault("name", node.get("name") or data["node"]["id"])
+    data["node"]["id"] = node.get("id") or data["node"].get("id") or node.get("name") or base
+    if node.get("name"):
+        data["node"]["name"] = node.get("name")
+    else:
+        data["node"].setdefault("name", data["node"]["id"])
+    if node.get("location"):
+        data["node"]["location"] = node.get("location")
     data["node"]["status"] = "online"
     return data
 
@@ -315,11 +440,13 @@ def combined_snapshot():
     for snap in snapshots:
         for target in snap.get("targets", []):
             targets[target["id"]] = target
+    target_list = list(targets.values())
 
     return {
         "generated_at": now_ms(),
         "interval_seconds": config.get("interval_seconds", 5),
-        "targets": list(targets.values()),
+        "selected_target": selected_target_for(config, target_list),
+        "targets": target_list,
         "nodes": snapshots,
     }
 
@@ -328,8 +455,10 @@ def probe_loop():
     while True:
         config = load_config()
         targets = sanitize_targets(config.get("targets", []))
-        history_limit = max(10, int(config.get("history_minutes", 60)) * 60 * 1000)
+        history_limit = max(10, int(config.get("history_minutes", 1440)) * 60 * 1000)
         timestamp = now_ms()
+        cutoff = timestamp - history_limit
+        active_target_ids = {target["id"] for target in targets}
 
         for target in targets:
             latency, error = probe_target(target)
@@ -343,11 +472,16 @@ def probe_loop():
             with STATE_LOCK:
                 bucket = STATE["results"].setdefault(tid, {"series": []})
                 bucket["series"].append(sample)
-                cutoff = timestamp - history_limit
                 bucket["series"] = [item for item in bucket["series"] if item["t"] >= cutoff]
                 bucket.update(sample)
 
         with STATE_LOCK:
+            for tid in list(STATE["results"].keys()):
+                if tid not in active_target_ids:
+                    STATE["results"].pop(tid, None)
+                    continue
+                bucket = STATE["results"][tid]
+                bucket["series"] = [item for item in bucket.get("series", []) if item["t"] >= cutoff]
             STATE["targets"] = targets
 
         time.sleep(max(2, int(config.get("interval_seconds", 5))))
@@ -390,6 +524,8 @@ class Handler(BaseHTTPRequestHandler):
         return hmac.compare_digest(provided, expected)
 
     def send_file(self, path, content_type):
+        if not path.exists() or not path.is_file():
+            return self.send_json({"error": "not found"}, status=404)
         body = path.read_bytes()
         self.send_response(200)
         self.send_header("Content-Type", content_type)
@@ -409,6 +545,8 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/health":
             return self.send_json({"ok": True, "time": now_ms()})
         if parsed.path in ("/", "/index.html"):
+            if not dashboard_enabled(load_config()):
+                return self.send_json({"error": "dashboard disabled"}, status=404)
             return self.send_file(STATIC_DIR / "index.html", "text/html; charset=utf-8")
         self.send_json({"error": "not found"}, status=404)
 
@@ -420,6 +558,20 @@ class Handler(BaseHTTPRequestHandler):
 
             parsed = urlparse(self.path)
             config = load_config()
+            if parsed.path == "/api/auth":
+                return self.send_json({"ok": True, "admin": True})
+
+            if parsed.path == "/api/preferences":
+                selected = validate_selected_target(payload)
+                config["selected_target"] = selected
+                save_config(config)
+                return self.send_json({"ok": True, "selected_target": selected})
+
+            if parsed.path == "/api/node":
+                profile = validate_node_profile(payload)
+                node = update_local_node_profile(config, profile)
+                return self.send_json({"ok": True, "node": node})
+
             if parsed.path == "/api/nodes":
                 node = validate_remote_node(payload.get("node") or payload)
                 config["remote_nodes"] = upsert_by_id(
@@ -431,17 +583,91 @@ class Handler(BaseHTTPRequestHandler):
                 public_node.pop("admin_token", None)
                 return self.send_json({"ok": True, "node": public_node})
 
+            if parsed.path == "/api/nodes/update":
+                node_id = str(payload.get("node_id") or payload.get("id") or "").strip()
+                if not node_id:
+                    raise ValueError("node_id is required")
+                profile = validate_node_profile(payload)
+                if node_id == str(config.get("node_id", "local")):
+                    node = update_local_node_profile(config, profile)
+                    return self.send_json({"ok": True, "node": node, "synced": [], "skipped": []})
+
+                synced = []
+                skipped = []
+                remote_nodes = config.get("remote_nodes", [])
+                for index, node in enumerate(remote_nodes):
+                    if str(node.get("id")) != node_id:
+                        continue
+                    updated = dict(node)
+                    updated["name"] = profile["name"]
+                    updated["location"] = profile["location"]
+                    remote_nodes[index] = updated
+                    config["remote_nodes"] = remote_nodes
+                    save_config(config)
+                    token = updated.get("admin_token") or ""
+                    if token:
+                        try:
+                            post_remote_json(
+                                updated,
+                                "/api/node",
+                                {
+                                    "admin_token": token,
+                                    "name": profile["name"],
+                                    "location": profile["location"],
+                                },
+                            )
+                            synced.append({"id": node_id, "ok": True, "action": "update"})
+                        except Exception as exc:
+                            skipped.append({"id": node_id, "reason": str(exc)[:120]})
+                    else:
+                        skipped.append({"id": node_id, "reason": "missing remote token"})
+                    public_node = dict(updated)
+                    public_node.pop("admin_token", None)
+                    return self.send_json(
+                        {
+                            "ok": True,
+                            "node": public_node,
+                            "synced": synced,
+                            "skipped": skipped,
+                        }
+                    )
+                raise ValueError("VPS node not found")
+
             if parsed.path == "/api/targets":
                 target = validate_target(payload.get("target") or payload)
-                config["targets"] = upsert_by_id(config.get("targets", []), target)
-                save_config(config)
+                node_ids = parse_node_ids(payload)
                 synced, skipped = [], []
-                if payload.get("sync", True):
+                if node_ids is None:
+                    config["targets"] = upsert_by_id(config.get("targets", []), target)
+                    save_config(config)
+                else:
+                    synced, skipped = apply_target_to_node_ids(config, target, node_ids)
+                if node_ids is None and payload.get("sync", True):
                     synced, skipped = sync_target_to_remote_nodes(config, target)
                 return self.send_json(
                     {
                         "ok": True,
                         "target": target,
+                        "assigned_node_ids": sorted(node_ids) if node_ids is not None else None,
+                        "synced": synced,
+                        "skipped": skipped,
+                    }
+                )
+
+            if parsed.path == "/api/targets/delete":
+                raw_id = payload.get("target_id") or payload.get("id") or ""
+                target_id_value = normalize_id(raw_id)
+                config["targets"] = remove_by_id(config.get("targets", []), target_id_value)
+                if str(config.get("selected_target") or ALL_TARGETS) == target_id_value:
+                    config["selected_target"] = ALL_TARGETS
+                save_config(config)
+                synced, skipped = [], []
+                if payload.get("sync", False):
+                    synced, skipped = delete_target_from_remote_nodes(config, target_id_value)
+                return self.send_json(
+                    {
+                        "ok": True,
+                        "target_id": target_id_value,
                         "synced": synced,
                         "skipped": skipped,
                     }
@@ -454,6 +680,10 @@ class Handler(BaseHTTPRequestHandler):
     def do_HEAD(self):
         parsed = urlparse(self.path)
         if parsed.path in ("/", "/index.html"):
+            if not dashboard_enabled(load_config()):
+                self.send_response(404)
+                self.end_headers()
+                return
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()

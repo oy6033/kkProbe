@@ -5,8 +5,10 @@
   "bind_host": "0.0.0.0",
   "port": 8099,
   "admin_token": "",
+  "dashboard_enabled": true,
   "interval_seconds": 5,
-  "history_minutes": 60,
+  "history_minutes": 1440,
+  "selected_target": "__all__",
   "targets": [
     {
       "id": "cloudflare-dns",
