@@ -13,6 +13,7 @@
 - 登录后管理，不再每次操作都输入 token
 - Target 下拉选择保存到后端，多设备打开保持一致
 - Latency Timeline 保留并渲染最近 24 小时数据
+- Latency Timeline 支持 Peak 开关，开启后会隐藏异常高延迟点
 
 ## 文件
 

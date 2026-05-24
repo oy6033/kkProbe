@@ -223,6 +223,12 @@
         background: rgba(64, 217, 138, 0.16);
       }
 
+      .toggle.active {
+        color: #dfffee;
+        border-color: rgba(64, 217, 138, 0.72);
+        background: rgba(64, 217, 138, 0.22);
+      }
+
       .combo {
         position: relative;
         min-width: 180px;
@@ -764,6 +770,7 @@
                 <button class="combo-trigger" id="targetSelectButton" type="button" aria-haspopup="listbox" aria-expanded="false">Target</button>
                 <div class="combo-menu" id="targetMenu" role="listbox"></div>
               </div>
+              <button class="toggle" id="peakToggleBtn" type="button" aria-pressed="false">Peak</button>
             </div>
           </div>
           <div class="chart-wrap">
@@ -794,6 +801,7 @@
       const state = {
         data: null,
         selectedTarget: ALL_TARGETS,
+        trimPeaks: false,
         savingSelectedTarget: false,
         selectedTargetVersion: 0,
         selectedTargetSaveId: 0,
@@ -1013,6 +1021,32 @@
         }));
       }
 
+      function quantile(sortedValues, q) {
+        if (!sortedValues.length) return 0;
+        const index = (sortedValues.length - 1) * q;
+        const low = Math.floor(index);
+        const high = Math.ceil(index);
+        if (low === high) return sortedValues[low];
+        return sortedValues[low] + (sortedValues[high] - sortedValues[low]) * (index - low);
+      }
+
+      function trimPeakPoints(points) {
+        if (!state.trimPeaks || points.length < 5) return points;
+        const values = points
+          .map((point) => point.latency_ms)
+          .filter((value) => Number.isFinite(value))
+          .sort((a, b) => a - b);
+        if (values.length < 5) return points;
+        const q1 = quantile(values, 0.25);
+        const median = quantile(values, 0.5);
+        const q3 = quantile(values, 0.75);
+        const p90 = quantile(values, 0.9);
+        const spread = Math.max(q3 - q1, p90 - median, 1);
+        const cutoff = Math.max(q3 + spread * 3, median + Math.max(20, median * 0.35));
+        const trimmed = points.filter((point) => point.latency_ms <= cutoff);
+        return trimmed.length >= Math.max(2, Math.floor(points.length * 0.25)) ? trimmed : points;
+      }
+
       function nodeHasTarget(nodeWrap, targetId) {
         return (nodeWrap.targets || []).some((target) => target.id === targetId);
       }
@@ -1114,6 +1148,12 @@
         });
       }
 
+      function updatePeakButton() {
+        const button = $("peakToggleBtn");
+        button.classList.toggle("active", state.trimPeaks);
+        button.setAttribute("aria-pressed", String(state.trimPeaks));
+      }
+
       async function saveSelectedTarget(targetId) {
         const previous = state.selectedTarget;
         const requestedTarget = targetId || ALL_TARGETS;
@@ -1178,7 +1218,7 @@
         const rawLines = visibleSeries(data)
           .map((line) => ({
             ...line,
-            points: line.points.filter((point) => point.t >= day.start && point.t <= day.end),
+            points: trimPeakPoints(line.points.filter((point) => point.t >= day.start && point.t <= day.end)),
           }))
           .filter((line) => line.points.length);
         const rawPoints = rawLines.flatMap((line) => line.points);
@@ -1649,6 +1689,11 @@
         const isOpen = combo.classList.toggle("open");
         $("targetSelectButton").setAttribute("aria-expanded", String(isOpen));
       });
+      $("peakToggleBtn").addEventListener("click", () => {
+        state.trimPeaks = !state.trimPeaks;
+        updatePeakButton();
+        drawChart();
+      });
       document.addEventListener("click", (event) => {
         if (!$("targetCombo").contains(event.target)) {
           $("targetCombo").classList.remove("open");
@@ -1675,6 +1720,7 @@
       window.addEventListener("resize", drawChart);
 
       setClock();
+      updatePeakButton();
       setInterval(setClock, 1000);
       initAuth();
       loadSnapshot();
