@@ -223,6 +223,67 @@
         background: rgba(64, 217, 138, 0.16);
       }
 
+      .combo {
+        position: relative;
+        min-width: 180px;
+      }
+
+      .combo-trigger {
+        width: 100%;
+        min-width: 180px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 0 12px;
+        text-align: left;
+      }
+
+      .combo-trigger::after {
+        content: "";
+        width: 8px;
+        height: 8px;
+        border-right: 2px solid currentColor;
+        border-bottom: 2px solid currentColor;
+        transform: rotate(45deg) translateY(-2px);
+        opacity: 0.8;
+      }
+
+      .combo-menu {
+        position: absolute;
+        z-index: 30;
+        top: calc(100% + 6px);
+        left: 0;
+        right: 0;
+        display: none;
+        overflow: hidden;
+        border: 1px solid rgba(64, 217, 138, 0.45);
+        border-radius: 6px;
+        background: #10161d;
+        box-shadow: 0 18px 48px rgba(0, 0, 0, 0.62);
+      }
+
+      .combo.open .combo-menu {
+        display: block;
+      }
+
+      .combo-item {
+        width: 100%;
+        height: 38px;
+        border: 0;
+        border-radius: 0;
+        background: #10161d;
+        color: #eef2f0;
+        padding: 0 12px;
+        text-align: left;
+      }
+
+      .combo-item:hover,
+      .combo-item.active {
+        background: #1d6f51;
+        color: #ffffff;
+      }
+
       .chart-wrap {
         position: relative;
         height: 430px;
@@ -508,7 +569,10 @@
           <div class="panel-header">
             <h2 class="panel-title">Latency Timeline</h2>
             <div class="toolbar">
-              <select id="targetSelect" aria-label="Target"></select>
+              <div class="combo" id="targetCombo">
+                <button class="combo-trigger" id="targetSelectButton" type="button" aria-haspopup="listbox" aria-expanded="false">Target</button>
+                <div class="combo-menu" id="targetMenu" role="listbox"></div>
+              </div>
               <button class="primary" id="addNodeBtn" type="button">Add VPS</button>
               <button class="primary" id="addTargetBtn" type="button">Add Target</button>
               <button id="refreshBtn" type="button">Refresh</button>
@@ -575,17 +639,26 @@
       }
 
       function updateTargetSelect(targets) {
-        const select = $("targetSelect");
         const current = state.selectedTarget;
-        select.innerHTML = "";
-        targets.forEach((target) => {
-          const option = document.createElement("option");
-          option.value = target.id;
-          option.textContent = target.name;
-          select.appendChild(option);
-        });
+        const button = $("targetSelectButton");
+        const menu = $("targetMenu");
         state.selectedTarget = targets.find((t) => t.id === current)?.id || targets[0]?.id || "";
-        select.value = state.selectedTarget;
+        const selected = targets.find((t) => t.id === state.selectedTarget);
+        button.textContent = selected?.name || "Target";
+        menu.innerHTML = targets.map((target) => `
+          <button class="combo-item ${target.id === state.selectedTarget ? "active" : ""}" type="button" data-target-id="${target.id}" role="option" aria-selected="${target.id === state.selectedTarget}">
+            ${target.name}
+          </button>
+        `).join("");
+        menu.querySelectorAll(".combo-item").forEach((item) => {
+          item.addEventListener("click", () => {
+            state.selectedTarget = item.dataset.targetId;
+            $("targetCombo").classList.remove("open");
+            $("targetSelectButton").setAttribute("aria-expanded", "false");
+            updateTargetSelect(state.data?.targets || []);
+            render();
+          });
+        });
       }
 
       function drawChart() {
@@ -825,9 +898,16 @@
         await loadSnapshot();
       }
 
-      $("targetSelect").addEventListener("change", (event) => {
-        state.selectedTarget = event.target.value;
-        render();
+      $("targetSelectButton").addEventListener("click", () => {
+        const combo = $("targetCombo");
+        const isOpen = combo.classList.toggle("open");
+        $("targetSelectButton").setAttribute("aria-expanded", String(isOpen));
+      });
+      document.addEventListener("click", (event) => {
+        if (!$("targetCombo").contains(event.target)) {
+          $("targetCombo").classList.remove("open");
+          $("targetSelectButton").setAttribute("aria-expanded", "false");
+        }
       });
       $("refreshBtn").addEventListener("click", loadSnapshot);
       $("addNodeBtn").addEventListener("click", () => openModal("node"));
