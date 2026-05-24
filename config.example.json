@@ -1,0 +1,27 @@
+{
+  "node_id": "replace-with-node-id",
+  "node_name": "My VPS",
+  "location": "Singapore",
+  "bind_host": "0.0.0.0",
+  "port": 8099,
+  "admin_token": "",
+  "interval_seconds": 5,
+  "history_minutes": 60,
+  "targets": [
+    {
+      "id": "cloudflare-dns",
+      "name": "Cloudflare DNS",
+      "kind": "icmp",
+      "host": "1.1.1.1",
+      "timeout_seconds": 2
+    },
+    {
+      "id": "google-dns",
+      "name": "Google DNS",
+      "kind": "icmp",
+      "host": "8.8.8.8",
+      "timeout_seconds": 2
+    }
+  ],
+  "remote_nodes": []
+}

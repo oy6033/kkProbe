@@ -1,0 +1,848 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>VPS Latency Probe</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #090b0f;
+        --panel: rgba(18, 22, 28, 0.82);
+        --panel-strong: rgba(24, 29, 36, 0.96);
+        --line: rgba(255, 255, 255, 0.12);
+        --text: #eef2f0;
+        --muted: #93a0a3;
+        --green: #40d98a;
+        --amber: #f5b944;
+        --cyan: #40c7d8;
+        --rose: #ff5c7a;
+        --ink: #0f1418;
+        --radius: 8px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background:
+          linear-gradient(rgba(255,255,255,0.035) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255,255,255,0.035) 1px, transparent 1px),
+          linear-gradient(135deg, #090b0f 0%, #111613 42%, #171218 100%);
+        background-size: 42px 42px, 42px 42px, auto;
+        color: var(--text);
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        letter-spacing: 0;
+      }
+
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        background: repeating-linear-gradient(
+          180deg,
+          rgba(255,255,255,0.03) 0,
+          rgba(255,255,255,0.03) 1px,
+          transparent 1px,
+          transparent 7px
+        );
+        mix-blend-mode: screen;
+        opacity: 0.3;
+      }
+
+      .shell {
+        width: min(1400px, calc(100% - 32px));
+        margin: 0 auto;
+        padding: 24px 0 32px;
+      }
+
+      .topbar {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 18px 0 20px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 30px;
+        line-height: 1.1;
+        font-weight: 760;
+      }
+
+      .subtitle {
+        margin: 8px 0 0;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .clock {
+        min-width: 210px;
+        padding: 12px 14px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: rgba(255,255,255,0.045);
+        text-align: right;
+      }
+
+      .clock strong {
+        display: block;
+        font-size: 18px;
+      }
+
+      .clock span {
+        display: block;
+        color: var(--muted);
+        font-size: 12px;
+        margin-top: 4px;
+      }
+
+      .metrics {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+
+      .metric,
+      .node-card,
+      .target-row {
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--panel);
+        box-shadow: 0 14px 38px rgba(0,0,0,0.28);
+        backdrop-filter: blur(18px);
+      }
+
+      .metric {
+        min-height: 94px;
+        padding: 14px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+      }
+
+      .metric .label {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .metric .value {
+        font-size: 27px;
+        font-weight: 780;
+      }
+
+      .metric .hint {
+        color: var(--muted);
+        font-size: 12px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1.7fr) minmax(320px, 0.8fr);
+        gap: 12px;
+      }
+
+      .panel {
+        min-width: 0;
+        padding: 4px 0 0;
+      }
+
+      .panel-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+
+      .panel-title {
+        margin: 0;
+        font-size: 16px;
+        font-weight: 720;
+      }
+
+      .toolbar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      select,
+      button {
+        height: 36px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: rgba(255,255,255,0.08);
+        color: var(--text);
+        font: inherit;
+        font-size: 13px;
+      }
+
+      select {
+        min-width: 180px;
+        padding: 0 10px;
+        color-scheme: dark;
+      }
+
+      select option {
+        background: #121820;
+        color: #eef2f0;
+      }
+
+      select option:checked {
+        background: #1f8f5e;
+        color: #ffffff;
+      }
+
+      select option:disabled {
+        color: #6f7a7d;
+      }
+
+      button {
+        padding: 0 12px;
+        cursor: pointer;
+      }
+
+      button:hover,
+      select:hover {
+        border-color: rgba(64, 217, 138, 0.55);
+      }
+
+      .primary {
+        color: #dfffee;
+        background: rgba(64, 217, 138, 0.16);
+      }
+
+      .chart-wrap {
+        position: relative;
+        height: 430px;
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: var(--radius);
+        background:
+          linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01)),
+          rgba(3,5,7,0.52);
+        overflow: hidden;
+      }
+
+      #chart {
+        width: 100%;
+        height: 100%;
+        display: block;
+      }
+
+      .scanline {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        background: linear-gradient(180deg, transparent, rgba(64, 217, 138, 0.08), transparent);
+        height: 120px;
+        animation: scan 4.8s linear infinite;
+      }
+
+      @keyframes scan {
+        from { transform: translateY(-130px); }
+        to { transform: translateY(460px); }
+      }
+
+      .nodes {
+        display: grid;
+        gap: 10px;
+      }
+
+      .node-card {
+        padding: 13px;
+      }
+
+      .node-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+
+      .node-name {
+        font-weight: 720;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .badge {
+        flex: 0 0 auto;
+        min-width: 68px;
+        text-align: center;
+        padding: 4px 8px;
+        border-radius: 999px;
+        font-size: 12px;
+        border: 1px solid rgba(255,255,255,0.14);
+      }
+
+      .badge.online {
+        color: #bff8d8;
+        background: rgba(64,217,138,0.12);
+      }
+
+      .badge.offline {
+        color: #ffd0d8;
+        background: rgba(255,92,122,0.12);
+      }
+
+      .node-meta {
+        color: var(--muted);
+        margin-top: 6px;
+        font-size: 12px;
+      }
+
+      .bar {
+        height: 8px;
+        background: rgba(255,255,255,0.08);
+        border-radius: 999px;
+        margin-top: 12px;
+        overflow: hidden;
+      }
+
+      .bar span {
+        display: block;
+        height: 100%;
+        width: 0%;
+        background: linear-gradient(90deg, var(--green), var(--amber), var(--rose));
+        border-radius: inherit;
+        transition: width 0.35s ease;
+      }
+
+      .targets {
+        display: grid;
+        gap: 8px;
+        margin-top: 12px;
+      }
+
+      .target-row {
+        display: grid;
+        grid-template-columns: minmax(130px, 1fr) 92px 80px;
+        gap: 10px;
+        align-items: center;
+        padding: 10px 12px;
+      }
+
+      .target-row span {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .latency {
+        font-variant-numeric: tabular-nums;
+        font-weight: 720;
+      }
+
+      .good { color: var(--green); }
+      .warn { color: var(--amber); }
+      .bad { color: var(--rose); }
+      .muted { color: var(--muted); }
+
+      .modal {
+        position: fixed;
+        inset: 0;
+        display: none;
+        place-items: center;
+        z-index: 20;
+        padding: 20px;
+        background: rgba(0, 0, 0, 0.58);
+        backdrop-filter: blur(12px);
+      }
+
+      .modal.open {
+        display: grid;
+      }
+
+      .dialog {
+        width: min(520px, 100%);
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--panel-strong);
+        box-shadow: 0 28px 80px rgba(0,0,0,0.55);
+        padding: 18px;
+      }
+
+      .dialog h3 {
+        margin: 0 0 14px;
+        font-size: 18px;
+      }
+
+      .form-grid {
+        display: grid;
+        gap: 10px;
+      }
+
+      .field {
+        display: grid;
+        gap: 6px;
+      }
+
+      .field label {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      input {
+        width: 100%;
+        height: 38px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: rgba(255,255,255,0.08);
+        color: var(--text);
+        padding: 0 10px;
+        font: inherit;
+        font-size: 13px;
+      }
+
+      .dialog-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-top: 16px;
+      }
+
+      .form-error {
+        min-height: 18px;
+        color: var(--rose);
+        font-size: 12px;
+      }
+
+      @media (max-width: 960px) {
+        .shell {
+          width: min(100% - 20px, 1400px);
+          padding-top: 14px;
+        }
+
+        .topbar,
+        .panel-header {
+          flex-direction: column;
+          align-items: stretch;
+        }
+
+        .clock {
+          text-align: left;
+          min-width: 0;
+        }
+
+        .metrics,
+        .layout {
+          grid-template-columns: 1fr;
+        }
+
+        .chart-wrap {
+          height: 360px;
+        }
+      }
+
+      @media (max-width: 560px) {
+        h1 {
+          font-size: 24px;
+        }
+
+        .metrics {
+          grid-template-columns: 1fr 1fr;
+        }
+
+        .target-row {
+          grid-template-columns: 1fr 76px;
+        }
+
+        .target-row span:nth-child(2) {
+          display: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <header class="topbar">
+        <div>
+          <h1>VPS Latency Probe</h1>
+          <p class="subtitle" id="subtitle">connecting</p>
+        </div>
+        <div class="clock">
+          <strong id="clock">--:--:--</strong>
+          <span id="updated">waiting for samples</span>
+        </div>
+      </header>
+
+      <section class="metrics">
+        <div class="metric">
+          <div class="label">Nodes</div>
+          <div class="value" id="nodeCount">0</div>
+          <div class="hint" id="nodeHint">online</div>
+        </div>
+        <div class="metric">
+          <div class="label">Targets</div>
+          <div class="value" id="targetCount">0</div>
+          <div class="hint">active probes</div>
+        </div>
+        <div class="metric">
+          <div class="label">Median</div>
+          <div class="value" id="medianLatency">--</div>
+          <div class="hint">selected target</div>
+        </div>
+        <div class="metric">
+          <div class="label">Worst</div>
+          <div class="value" id="worstLatency">--</div>
+          <div class="hint" id="worstNode">no data</div>
+        </div>
+      </section>
+
+      <main class="layout">
+        <section class="panel">
+          <div class="panel-header">
+            <h2 class="panel-title">Latency Timeline</h2>
+            <div class="toolbar">
+              <select id="targetSelect" aria-label="Target"></select>
+              <button class="primary" id="addNodeBtn" type="button">Add VPS</button>
+              <button class="primary" id="addTargetBtn" type="button">Add Target</button>
+              <button id="refreshBtn" type="button">Refresh</button>
+            </div>
+          </div>
+          <div class="chart-wrap">
+            <canvas id="chart"></canvas>
+            <div class="scanline"></div>
+          </div>
+          <div class="targets" id="targetRows"></div>
+        </section>
+
+        <aside class="panel">
+          <div class="panel-header">
+            <h2 class="panel-title">Probe Nodes</h2>
+          </div>
+          <div class="nodes" id="nodes"></div>
+        </aside>
+      </main>
+    </div>
+
+    <div class="modal" id="modal" role="dialog" aria-modal="true">
+      <div class="dialog">
+        <h3 id="modalTitle"></h3>
+        <form id="modalForm" class="form-grid"></form>
+        <div class="form-error" id="modalError"></div>
+        <div class="dialog-actions">
+          <button id="cancelModal" type="button">Cancel</button>
+          <button class="primary" id="saveModal" type="button">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const colors = ["#40d98a", "#40c7d8", "#f5b944", "#ff5c7a", "#c9f24a", "#e68cff"];
+      const state = { data: null, selectedTarget: null, modalMode: "" };
+      const $ = (id) => document.getElementById(id);
+
+      function fmtLatency(value) {
+        if (value === null || value === undefined || Number.isNaN(value)) return "--";
+        return `${Math.round(value)}ms`;
+      }
+
+      function latencyClass(value) {
+        if (value === null || value === undefined) return "muted";
+        if (value < 80) return "good";
+        if (value < 180) return "warn";
+        return "bad";
+      }
+
+      function setClock() {
+        const now = new Date();
+        $("clock").textContent = now.toLocaleTimeString();
+      }
+
+      function latestFor(node, targetId) {
+        const result = node.results?.[targetId];
+        if (!result) return null;
+        return result.latency_ms ?? null;
+      }
+
+      function seriesFor(node, targetId) {
+        return node.results?.[targetId]?.series || [];
+      }
+
+      function updateTargetSelect(targets) {
+        const select = $("targetSelect");
+        const current = state.selectedTarget;
+        select.innerHTML = "";
+        targets.forEach((target) => {
+          const option = document.createElement("option");
+          option.value = target.id;
+          option.textContent = target.name;
+          select.appendChild(option);
+        });
+        state.selectedTarget = targets.find((t) => t.id === current)?.id || targets[0]?.id || "";
+        select.value = state.selectedTarget;
+      }
+
+      function drawChart() {
+        const canvas = $("chart");
+        const rect = canvas.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = Math.max(1, Math.floor(rect.width * dpr));
+        canvas.height = Math.max(1, Math.floor(rect.height * dpr));
+        const ctx = canvas.getContext("2d");
+        ctx.scale(dpr, dpr);
+        ctx.clearRect(0, 0, rect.width, rect.height);
+
+        const data = state.data;
+        if (!data || !state.selectedTarget) return;
+        const pad = { left: 54, right: 18, top: 22, bottom: 34 };
+        const w = rect.width - pad.left - pad.right;
+        const h = rect.height - pad.top - pad.bottom;
+        const nodes = data.nodes || [];
+        const all = nodes.flatMap((node) => seriesFor(node, state.selectedTarget));
+        if (!all.length) {
+          ctx.fillStyle = "rgba(238,242,240,0.62)";
+          ctx.font = "14px sans-serif";
+          ctx.fillText("waiting for samples", pad.left, pad.top + 28);
+          return;
+        }
+        const minT = Math.min(...all.map((p) => p.t));
+        const maxT = Math.max(...all.map((p) => p.t));
+        const maxLatency = Math.max(50, ...all.map((p) => p.latency_ms || 0)) * 1.2;
+
+        ctx.strokeStyle = "rgba(255,255,255,0.1)";
+        ctx.lineWidth = 1;
+        ctx.font = "12px sans-serif";
+        ctx.fillStyle = "rgba(147,160,163,0.9)";
+        for (let i = 0; i <= 5; i += 1) {
+          const y = pad.top + (h / 5) * i;
+          const value = Math.round(maxLatency - (maxLatency / 5) * i);
+          ctx.beginPath();
+          ctx.moveTo(pad.left, y);
+          ctx.lineTo(pad.left + w, y);
+          ctx.stroke();
+          ctx.fillText(`${value}ms`, 8, y + 4);
+        }
+
+        const xFor = (t) => pad.left + ((t - minT) / Math.max(1, maxT - minT)) * w;
+        const yFor = (v) => pad.top + h - (Math.min(maxLatency, v || 0) / maxLatency) * h;
+
+        nodes.forEach((nodeWrap, index) => {
+          const points = seriesFor(nodeWrap, state.selectedTarget).filter((p) => p.latency_ms !== null);
+          if (!points.length) return;
+          const color = colors[index % colors.length];
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 2.5;
+          ctx.shadowColor = color;
+          ctx.shadowBlur = 9;
+          ctx.beginPath();
+          points.forEach((point, pointIndex) => {
+            const x = xFor(point.t);
+            const y = yFor(point.latency_ms);
+            if (pointIndex === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+          });
+          ctx.stroke();
+          ctx.shadowBlur = 0;
+
+          const last = points[points.length - 1];
+          ctx.fillStyle = color;
+          ctx.beginPath();
+          ctx.arc(xFor(last.t), yFor(last.latency_ms), 4, 0, Math.PI * 2);
+          ctx.fill();
+        });
+      }
+
+      function render() {
+        const data = state.data;
+        if (!data) return;
+        const targets = data.targets || [];
+        const nodes = data.nodes || [];
+        const online = nodes.filter((n) => n.node?.status === "online").length;
+
+        $("subtitle").textContent = `${online}/${nodes.length} nodes online`;
+        $("updated").textContent = `updated ${new Date(data.generated_at).toLocaleTimeString()}`;
+        $("nodeCount").textContent = nodes.length;
+        $("nodeHint").textContent = `${online} online`;
+        $("targetCount").textContent = targets.length;
+
+        const selected = state.selectedTarget;
+        const latencies = nodes.map((node) => latestFor(node, selected)).filter((v) => v !== null);
+        latencies.sort((a, b) => a - b);
+        const median = latencies.length ? latencies[Math.floor(latencies.length / 2)] : null;
+        const worst = latencies.length ? Math.max(...latencies) : null;
+        const worstNode = nodes.find((node) => latestFor(node, selected) === worst);
+        $("medianLatency").textContent = fmtLatency(median);
+        $("worstLatency").textContent = fmtLatency(worst);
+        $("worstNode").textContent = worstNode?.node?.name || "no data";
+
+        $("nodes").innerHTML = nodes.map((nodeWrap, index) => {
+          const node = nodeWrap.node || {};
+          const latency = latestFor(nodeWrap, selected);
+          const pct = latency === null ? 0 : Math.min(100, Math.round((latency / 260) * 100));
+          return `
+            <div class="node-card">
+              <div class="node-top">
+                <div class="node-name" style="color:${colors[index % colors.length]}">${node.name || node.id}</div>
+                <div class="badge ${node.status === "online" ? "online" : "offline"}">${node.status || "unknown"}</div>
+              </div>
+              <div class="node-meta">${node.location || node.id || ""}</div>
+              <div class="node-meta ${latencyClass(latency)}">${fmtLatency(latency)}</div>
+              <div class="bar"><span style="width:${pct}%"></span></div>
+            </div>
+          `;
+        }).join("");
+
+        $("targetRows").innerHTML = targets.map((target) => {
+          const values = nodes.map((node) => latestFor(node, target.id)).filter((v) => v !== null);
+          const avg = values.length ? values.reduce((a, b) => a + b, 0) / values.length : null;
+          return `
+            <div class="target-row">
+              <span>${target.name}</span>
+              <span class="muted">${target.kind}</span>
+              <span class="latency ${latencyClass(avg)}">${fmtLatency(avg)}</span>
+            </div>
+          `;
+        }).join("");
+
+        drawChart();
+      }
+
+      async function loadSnapshot() {
+        const response = await fetch("/api/snapshot", { cache: "no-store" });
+        state.data = await response.json();
+        updateTargetSelect(state.data.targets || []);
+        render();
+      }
+
+      function adminToken() {
+        let token = localStorage.getItem("probeAdminToken") || "";
+        if (!token) {
+          token = window.prompt("Admin token") || "";
+          if (token) localStorage.setItem("probeAdminToken", token);
+        }
+        return token;
+      }
+
+      function field(name, label, attrs = "") {
+        return `
+          <div class="field">
+            <label for="${name}">${label}</label>
+            <input id="${name}" name="${name}" ${attrs} />
+          </div>
+        `;
+      }
+
+      function openModal(mode) {
+        state.modalMode = mode;
+        $("modalError").textContent = "";
+        $("modal").classList.add("open");
+        if (mode === "node") {
+          $("modalTitle").textContent = "Add VPS";
+          $("modalForm").innerHTML = [
+            field("url", "Probe URL", 'placeholder="http://1.2.3.4:8099" required'),
+            field("name", "Name", 'placeholder="Tokyo VPS" required'),
+            field("location", "Location", 'placeholder="Tokyo / JP"'),
+            field("nodeToken", "Remote Admin Token", 'placeholder="optional" type="password"'),
+          ].join("");
+          return;
+        }
+        $("modalTitle").textContent = "Add Target";
+        $("modalForm").innerHTML = `
+          <div class="field">
+            <label for="kind">Kind</label>
+            <select id="kind" name="kind">
+              <option value="icmp">ICMP</option>
+              <option value="http">HTTP</option>
+              <option value="tcp">TCP</option>
+            </select>
+          </div>
+          ${field("name", "Name", 'placeholder="Origin Server" required')}
+          ${field("host", "Host / URL", 'placeholder="example.com or https://example.com" required')}
+          ${field("port", "TCP Port", 'placeholder="443"')}
+          ${field("timeout", "Timeout Seconds", 'placeholder="3"')}
+        `;
+      }
+
+      function closeModal() {
+        $("modal").classList.remove("open");
+        $("modalForm").innerHTML = "";
+        $("modalError").textContent = "";
+      }
+
+      function formValue(name) {
+        const item = new FormData($("modalForm")).get(name);
+        return typeof item === "string" ? item.trim() : "";
+      }
+
+      async function saveModal() {
+        const token = adminToken();
+        if (!token) return;
+        let path = "";
+        let body = { admin_token: token };
+        if (state.modalMode === "node") {
+          path = "/api/nodes";
+          body.node = {
+            url: formValue("url"),
+            name: formValue("name"),
+            location: formValue("location"),
+            admin_token: formValue("nodeToken"),
+          };
+        } else {
+          path = "/api/targets";
+          const kind = formValue("kind");
+          const host = formValue("host");
+          body.target = {
+            kind,
+            name: formValue("name"),
+            timeout_seconds: Number(formValue("timeout") || 3),
+          };
+          if (kind === "http") body.target.url = host;
+          else {
+            body.target.host = host;
+            if (kind === "tcp") body.target.port = Number(formValue("port"));
+          }
+          body.sync = true;
+        }
+
+        const response = await fetch(path, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await response.json();
+        if (!response.ok || !data.ok) {
+          if (response.status === 401) localStorage.removeItem("probeAdminToken");
+          $("modalError").textContent = data.error || "Save failed";
+          return;
+        }
+        closeModal();
+        await loadSnapshot();
+      }
+
+      $("targetSelect").addEventListener("change", (event) => {
+        state.selectedTarget = event.target.value;
+        render();
+      });
+      $("refreshBtn").addEventListener("click", loadSnapshot);
+      $("addNodeBtn").addEventListener("click", () => openModal("node"));
+      $("addTargetBtn").addEventListener("click", () => openModal("target"));
+      $("cancelModal").addEventListener("click", closeModal);
+      $("saveModal").addEventListener("click", saveModal);
+      $("modal").addEventListener("click", (event) => {
+        if (event.target.id === "modal") closeModal();
+      });
+      window.addEventListener("resize", drawChart);
+
+      setClock();
+      setInterval(setClock, 1000);
+      loadSnapshot();
+      setInterval(loadSnapshot, 3000);
+    </script>
+  </body>
+</html>
