@@ -831,6 +831,19 @@
         return `${amount.toFixed(digits)} ${units[unitIndex]}`;
       }
 
+      function fmtBytes(value) {
+        if (value === null || value === undefined || Number.isNaN(value)) return "--";
+        const units = ["B", "KB", "MB", "GB", "TB", "PB"];
+        let amount = Math.max(0, Number(value));
+        let unitIndex = 0;
+        while (amount >= 1024 && unitIndex < units.length - 1) {
+          amount /= 1024;
+          unitIndex += 1;
+        }
+        const digits = amount >= 100 || unitIndex === 0 ? 0 : amount >= 10 ? 1 : 2;
+        return `${amount.toFixed(digits)} ${units[unitIndex]}`;
+      }
+
       function latencyClass(value) {
         if (value === null || value === undefined) return "muted";
         if (value < 80) return "good";
@@ -1374,7 +1387,8 @@
                 </div>
               </div>
               <div class="node-meta">${node.location || node.id || ""}</div>
-              <div class="node-meta">down ${fmtRate(network.rx_bytes_per_sec)} · up ${fmtRate(network.tx_bytes_per_sec)}</div>
+              <div class="node-meta">down ${fmtRate(network.rx_bytes_per_sec)} / up ${fmtRate(network.tx_bytes_per_sec)}</div>
+              <div class="node-meta">used down ${fmtBytes(network.rx_bytes)} / up ${fmtBytes(network.tx_bytes)}</div>
               <div class="node-meta ${latencyClass(latency)}">${latencyLabel}</div>
               <div class="bar"><span style="width:${pct}%"></span></div>
             </div>
