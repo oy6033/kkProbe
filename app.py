@@ -633,6 +633,28 @@ class Handler(BaseHTTPRequestHandler):
                     )
                 raise ValueError("VPS node not found")
 
+            if parsed.path == "/api/nodes/delete":
+                node_id = str(payload.get("node_id") or payload.get("id") or "").strip()
+                if not node_id:
+                    raise ValueError("node_id is required")
+                if node_id == str(config.get("node_id", "local")):
+                    raise ValueError("cannot delete the center node")
+                remote_nodes = config.get("remote_nodes", [])
+                deleted = None
+                kept = []
+                for node in remote_nodes:
+                    if str(node.get("id")) == node_id:
+                        deleted = dict(node)
+                    else:
+                        kept.append(node)
+                if deleted is None:
+                    raise ValueError("VPS node not found")
+                config["remote_nodes"] = kept
+                save_config(config)
+                deleted.pop("admin_token", None)
+                deleted.pop("token", None)
+                return self.send_json({"ok": True, "node": deleted})
+
             if parsed.path == "/api/targets":
                 target = validate_target(payload.get("target") or payload)
                 node_ids = parse_node_ids(payload)

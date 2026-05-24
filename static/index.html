@@ -376,10 +376,17 @@
         flex: 0 0 auto;
       }
 
-      .node-edit {
+      .node-edit,
+      .node-delete {
         height: 28px;
         padding: 0 9px;
         font-size: 12px;
+      }
+
+      .node-delete,
+      .target-delete {
+        color: #ffd0d8;
+        background: rgba(255, 92, 122, 0.12);
       }
 
       .node-name {
@@ -441,7 +448,7 @@
 
       .target-row {
         display: grid;
-        grid-template-columns: minmax(130px, 1fr) 76px 84px 80px 154px;
+        grid-template-columns: minmax(130px, 1fr) 76px 84px 80px 220px;
         gap: 10px;
         align-items: center;
         padding: 10px 12px;
@@ -470,6 +477,7 @@
         justify-content: flex-end;
         gap: 6px;
         min-width: 0;
+        flex-wrap: wrap;
       }
 
       .check-list {
@@ -650,7 +658,7 @@
         }
 
         .target-row {
-          grid-template-columns: 1fr 76px 68px;
+          grid-template-columns: minmax(0, 1fr) 76px;
         }
 
         .target-row span:nth-child(2) {
@@ -659,6 +667,11 @@
 
         .target-row span:nth-child(3) {
           display: none;
+        }
+
+        .target-actions {
+          grid-column: 1 / -1;
+          justify-content: flex-start;
         }
       }
     </style>
@@ -1255,6 +1268,7 @@
                 <div class="node-name" style="color:${lineColor(index)}">${node.name || node.id}</div>
                 <div class="node-actions">
                   <button class="node-edit" type="button" data-edit-node="${node.id}">Edit</button>
+                  ${index > 0 ? `<button class="node-delete" type="button" data-delete-node="${node.id}">Delete</button>` : ""}
                   <div class="badge ${node.status === "online" ? "online" : "offline"}">${node.status || "unknown"}</div>
                 </div>
               </div>
@@ -1271,6 +1285,12 @@
             if (nodeWrap) openModal("editNode", nodeWrap);
           });
         });
+        document.querySelectorAll("[data-delete-node]").forEach((button) => {
+          button.addEventListener("click", () => {
+            const nodeWrap = nodes.find((item) => item.node?.id === button.dataset.deleteNode);
+            if (nodeWrap) deleteNode(nodeWrap);
+          });
+        });
 
         $("targetRows").innerHTML = targets.map((target) => {
           const values = nodes.map((node) => latestFor(node, target.id)).filter((v) => v !== null);
@@ -1285,6 +1305,7 @@
               <div class="target-actions">
                 <button class="target-action" type="button" data-edit-target="${target.id}">Edit</button>
                 <button class="target-action" type="button" data-assign-target="${target.id}">Assign</button>
+                <button class="target-action target-delete" type="button" data-delete-target="${target.id}">Delete</button>
               </div>
             </div>
           `;
@@ -1301,6 +1322,12 @@
             if (!requireAdmin()) return;
             const target = targets.find((item) => item.id === button.dataset.assignTarget);
             if (target) openModal("assign", target);
+          });
+        });
+        document.querySelectorAll("[data-delete-target]").forEach((button) => {
+          button.addEventListener("click", () => {
+            const target = targets.find((item) => item.id === button.dataset.deleteTarget);
+            if (target) deleteTarget(target);
           });
         });
 
@@ -1321,6 +1348,58 @@
         const token = storedToken();
         if (!token && state.adminEnabled) showLogin("");
         return token;
+      }
+
+      async function deleteNode(nodeWrap) {
+        if (!requireAdmin()) return;
+        const node = nodeWrap.node || {};
+        const token = adminToken();
+        if (!token && state.adminEnabled) return;
+        if (!window.confirm(`Delete VPS node "${node.name || node.id}" from the center panel?`)) return;
+        const response = await fetch("/api/nodes/delete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            admin_token: token,
+            node_id: node.id,
+          }),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.ok) {
+          if (response.status === 401) {
+            setStoredToken("");
+            showLogin("Admin token expired or invalid");
+          }
+          window.alert(data.error || "Delete failed");
+          return;
+        }
+        await loadSnapshot();
+      }
+
+      async function deleteTarget(target) {
+        if (!requireAdmin()) return;
+        const token = adminToken();
+        if (!token && state.adminEnabled) return;
+        if (!window.confirm(`Delete target "${target.name}" from all assigned probes?`)) return;
+        const response = await fetch("/api/targets/delete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            admin_token: token,
+            target_id: target.id,
+            sync: true,
+          }),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.ok) {
+          if (response.status === 401) {
+            setStoredToken("");
+            showLogin("Admin token expired or invalid");
+          }
+          window.alert(data.error || "Delete failed");
+          return;
+        }
+        await loadSnapshot();
       }
 
       function field(name, label, attrs = "") {
