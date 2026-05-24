@@ -810,6 +810,19 @@
         return `${Math.round(value)}ms`;
       }
 
+      function fmtRate(value) {
+        if (value === null || value === undefined || Number.isNaN(value)) return "--";
+        const units = ["B/s", "KB/s", "MB/s", "GB/s", "TB/s"];
+        let amount = Math.max(0, Number(value));
+        let unitIndex = 0;
+        while (amount >= 1024 && unitIndex < units.length - 1) {
+          amount /= 1024;
+          unitIndex += 1;
+        }
+        const digits = amount >= 100 || unitIndex === 0 ? 0 : amount >= 10 ? 1 : 2;
+        return `${amount.toFixed(digits)} ${units[unitIndex]}`;
+      }
+
       function latencyClass(value) {
         if (value === null || value === undefined) return "muted";
         if (value < 80) return "good";
@@ -1266,6 +1279,7 @@
 
         $("nodes").innerHTML = nodes.map((nodeWrap, index) => {
           const node = nodeWrap.node || {};
+          const network = node.network || {};
           const nodeValues = visibleTargets(targets).map((target) => latestFor(nodeWrap, target.id)).filter((value) => value !== null);
           const latency = nodeValues.length ? Math.max(...nodeValues) : null;
           const pct = latency === null ? 0 : Math.min(100, Math.round((latency / 260) * 100));
@@ -1283,6 +1297,7 @@
                 </div>
               </div>
               <div class="node-meta">${node.location || node.id || ""}</div>
+              <div class="node-meta">down ${fmtRate(network.rx_bytes_per_sec)} · up ${fmtRate(network.tx_bytes_per_sec)}</div>
               <div class="node-meta ${latencyClass(latency)}">${latencyLabel}</div>
               <div class="bar"><span style="width:${pct}%"></span></div>
             </div>

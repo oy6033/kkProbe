@@ -8,6 +8,7 @@
 - 支持 ICMP、HTTP、TCP 三种 target
 - 支持给每个 target 指定要探测的 VPS 节点
 - 支持编辑和删除 Probe Nodes、Targets
+- 支持实时显示 Probe Nodes 上行和下行速率
 - 登录后管理，不再每次操作都输入 token
 - Target 下拉选择保存到后端，多设备打开保持一致
 - Latency Timeline 保留并渲染最近 24 小时数据

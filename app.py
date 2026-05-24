@@ -23,11 +23,60 @@ STATE = {
     "started_at": int(time.time() * 1000),
     "results": {},
     "targets": [],
+    "network": {},
 }
 
 
 def now_ms():
     return int(time.time() * 1000)
+
+
+def read_network_counters():
+    dev_path = Path("/proc/net/dev")
+    if not dev_path.exists():
+        return None
+    rx_bytes = 0
+    tx_bytes = 0
+    for line in dev_path.read_text(encoding="utf-8", errors="ignore").splitlines()[2:]:
+        if ":" not in line:
+            continue
+        iface, values = line.split(":", 1)
+        if iface.strip() == "lo":
+            continue
+        fields = values.split()
+        if len(fields) < 16:
+            continue
+        try:
+            rx_bytes += int(fields[0])
+            tx_bytes += int(fields[8])
+        except ValueError:
+            continue
+    return {"rx_bytes": rx_bytes, "tx_bytes": tx_bytes}
+
+
+def network_snapshot():
+    counters = read_network_counters()
+    timestamp = now_ms()
+    with STATE_LOCK:
+        previous = STATE.get("network") or {}
+        if counters is None:
+            return dict(previous)
+        elapsed = max(0.001, (timestamp - int(previous.get("updated_at", timestamp))) / 1000)
+        if "rx_bytes" in previous and "tx_bytes" in previous:
+            rx_rate = max(0, (counters["rx_bytes"] - int(previous["rx_bytes"])) / elapsed)
+            tx_rate = max(0, (counters["tx_bytes"] - int(previous["tx_bytes"])) / elapsed)
+        else:
+            rx_rate = 0
+            tx_rate = 0
+        current = {
+            "rx_bytes": counters["rx_bytes"],
+            "tx_bytes": counters["tx_bytes"],
+            "rx_bytes_per_sec": round(rx_rate, 2),
+            "tx_bytes_per_sec": round(tx_rate, 2),
+            "updated_at": timestamp,
+        }
+        STATE["network"] = current
+        return dict(current)
 
 
 def load_config():
@@ -390,6 +439,7 @@ def local_snapshot():
             "status": "online",
             "updated_at": now_ms(),
             "started_at": STATE["started_at"],
+            "network": network_snapshot(),
         },
         "targets": sanitize_targets(config.get("targets", [])),
         "results": results,
