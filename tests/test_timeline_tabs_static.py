@@ -28,6 +28,16 @@ def test_timeline_windows_are_rolling_from_current_time() -> None:
         raise AssertionError("24h tab must use a rolling 24 hour lookback, not the calendar day")
 
 
+def test_timeline_time_labels_avoid_overlap() -> None:
+    require("function drawTimeLabels(ctx, range, pad, w, h, rectWidth)", "collision-aware time label renderer")
+    require("const labelPadding = 10;", "time label spacing")
+    require("priority: 2", "boundary labels have priority")
+    require("placed.some", "label collision check")
+    if "const startLabel =" in HTML or "const endLabel =" in HTML:
+        raise AssertionError("timeline must not draw separate start/end labels that can overlap tick labels")
+
+
 if __name__ == "__main__":
     test_timeline_range_tabs_present()
     test_timeline_windows_are_rolling_from_current_time()
+    test_timeline_time_labels_avoid_overlap()

@@ -1068,6 +1068,49 @@
         return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
       }
 
+      function drawTimeLabels(ctx, range, pad, w, h, rectWidth) {
+        const labelPadding = 10;
+        const axisY = pad.top + h + 30;
+        const xForTime = (timestamp) => pad.left + ((timestamp - range.start) / (range.end - range.start)) * w;
+        const boundaryOptions = { hour: "2-digit", minute: "2-digit" };
+        const labels = [
+          {
+            timestamp: range.start,
+            text: new Date(range.start).toLocaleTimeString([], boundaryOptions),
+            priority: 2,
+            align: "start",
+          },
+          {
+            timestamp: range.end,
+            text: new Date(range.end).toLocaleTimeString([], boundaryOptions),
+            priority: 2,
+            align: "end",
+          },
+          ...timelineTicks(range).map((timestamp) => ({
+            timestamp,
+            text: timeTickLabel(timestamp, range),
+            priority: 1,
+            align: "center",
+          })),
+        ];
+        const placed = [];
+        ctx.fillStyle = "rgba(147,160,163,0.9)";
+        labels
+          .sort((a, b) => b.priority - a.priority || a.timestamp - b.timestamp)
+          .forEach((label) => {
+            const width = ctx.measureText(label.text).width;
+            const centerX = xForTime(label.timestamp);
+            let left = centerX - width / 2;
+            if (label.align === "start") left = pad.left;
+            if (label.align === "end") left = pad.left + w - width;
+            left = Math.max(6, Math.min(rectWidth - width - 6, left));
+            const right = left + width;
+            if (placed.some((item) => left < item.right + labelPadding && right > item.left - labelPadding)) return;
+            placed.push({ left, right });
+            ctx.fillText(label.text, left, axisY);
+          });
+      }
+
       function bucketPoints(points, range, width) {
         const bucketCount = Math.max(1, Math.floor(width * 1.5));
         const bucketSpan = (range.end - range.start) / bucketCount;
@@ -1381,18 +1424,8 @@
           ctx.moveTo(x, pad.top);
           ctx.lineTo(x, pad.top + h);
           ctx.stroke();
-          ctx.fillStyle = "rgba(147,160,163,0.9)";
-          const label = timeTickLabel(tick, range);
-          const labelWidth = ctx.measureText(label).width;
-          const labelX = Math.max(6, Math.min(rect.width - labelWidth - 6, x - labelWidth / 2));
-          ctx.fillText(label, labelX, pad.top + h + 22);
         });
-        const startLabel = new Date(range.start).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-        const endLabel = new Date(range.end).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-        ctx.fillStyle = "rgba(147,160,163,0.88)";
-        ctx.fillText(startLabel, pad.left, pad.top + h + 40);
-        const endWidth = ctx.measureText(endLabel).width;
-        ctx.fillText(endLabel, pad.left + w - endWidth, pad.top + h + 40);
+        drawTimeLabels(ctx, range, pad, w, h, rect.width);
 
         const xFor = (t) => pad.left + ((t - range.start) / (range.end - range.start)) * w;
         const yFor = (v) => pad.top + h - ((Math.min(yMax, Math.max(yMin, v || 0)) - yMin) / (yMax - yMin)) * h;
