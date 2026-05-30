@@ -1020,13 +1020,9 @@
         return { start: start.getTime(), end: start.getTime() + 24 * HOUR_MS };
       }
 
-      function timelineWindow(timestamp) {
-        const end = timestamp || Date.now();
+      function timelineWindow() {
+        const end = Date.now();
         const hours = TIMELINE_WINDOWS.includes(state.timelineHours) ? state.timelineHours : 24;
-        if (hours === 24) {
-          const day = dayRange(end);
-          return { ...day, day, hours };
-        }
         return {
           start: end - hours * HOUR_MS,
           end,
@@ -1318,7 +1314,7 @@
         const pad = { left: 70, right: 28, top: 26, bottom: 86 };
         const w = rect.width - pad.left - pad.right;
         const h = rect.height - pad.top - pad.bottom;
-        const timeWindow = timelineWindow(data.generated_at);
+        const timeWindow = timelineWindow();
         const rawLines = visibleSeries(data)
           .map((line) => ({
             ...line,

@@ -20,5 +20,14 @@ def test_timeline_range_tabs_present() -> None:
     require("data-time-range", "tab button data attribute")
 
 
+def test_timeline_windows_are_rolling_from_current_time() -> None:
+    require("function timelineWindow() {", "timeline window without server timestamp")
+    require("const end = Date.now();", "current browser time as window end")
+    require("start: end - hours * HOUR_MS,", "rolling lookback start")
+    if "if (hours === 24)" in HTML:
+        raise AssertionError("24h tab must use a rolling 24 hour lookback, not the calendar day")
+
+
 if __name__ == "__main__":
     test_timeline_range_tabs_present()
+    test_timeline_windows_are_rolling_from_current_time()
