@@ -229,6 +229,32 @@
         background: rgba(64, 217, 138, 0.22);
       }
 
+      .time-tabs {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: rgba(255,255,255,0.055);
+      }
+
+      .time-tab {
+        height: 28px;
+        min-width: 52px;
+        padding: 0 9px;
+        border: 0;
+        background: transparent;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .time-tab:hover,
+      .time-tab.active {
+        color: #dfffee;
+        background: rgba(64, 217, 138, 0.18);
+      }
+
       .combo {
         position: relative;
         min-width: 180px;
@@ -766,6 +792,7 @@
           <div class="panel-header">
             <h2 class="panel-title">Latency Timeline</h2>
             <div class="toolbar">
+              <div class="time-tabs" id="timeRangeTabs" role="tablist" aria-label="Timeline range"></div>
               <div class="combo" id="targetCombo">
                 <button class="combo-trigger" id="targetSelectButton" type="button" aria-haspopup="listbox" aria-expanded="false">Target</button>
                 <div class="combo-menu" id="targetMenu" role="listbox"></div>
@@ -796,11 +823,14 @@
 
     <script>
       const ALL_TARGETS = "__all__";
+      const HOUR_MS = 60 * 60 * 1000;
+      const TIMELINE_WINDOWS = [4, 8, 12, 24];
       const colors = ["#40d98a", "#40c7d8", "#f5b944", "#ff5c7a", "#c9f24a", "#e68cff", "#8eb7ff", "#ff9f43"];
       localStorage.removeItem("probeSelectedTarget");
       const state = {
         data: null,
         selectedTarget: ALL_TARGETS,
+        timelineHours: 24,
         trimPeaks: false,
         savingSelectedTarget: false,
         selectedTargetVersion: 0,
@@ -987,20 +1017,59 @@
       function dayRange(timestamp) {
         const start = new Date(timestamp || Date.now());
         start.setHours(0, 0, 0, 0);
-        return { start: start.getTime(), end: start.getTime() + 24 * 60 * 60 * 1000 };
+        return { start: start.getTime(), end: start.getTime() + 24 * HOUR_MS };
       }
 
-      function chartRange(points, day) {
-        if (!points.length) return day;
-        const minT = Math.max(day.start, Math.min(...points.map((point) => point.t)));
-        const maxT = Math.min(day.end, Math.max(...points.map((point) => point.t)));
+      function timelineWindow(timestamp) {
+        const end = timestamp || Date.now();
+        const hours = TIMELINE_WINDOWS.includes(state.timelineHours) ? state.timelineHours : 24;
+        if (hours === 24) {
+          const day = dayRange(end);
+          return { ...day, day, hours };
+        }
+        return {
+          start: end - hours * HOUR_MS,
+          end,
+          day: dayRange(end),
+          hours,
+        };
+      }
+
+      function chartRange(points, windowRange) {
+        if (!points.length) return windowRange;
+        const minT = Math.max(windowRange.start, Math.min(...points.map((point) => point.t)));
+        const maxT = Math.min(windowRange.end, Math.max(...points.map((point) => point.t)));
         const span = Math.max(1, maxT - minT);
         const padding = Math.max(15 * 60 * 1000, span * 0.12);
         return {
-          start: Math.max(day.start, minT - padding),
-          end: Math.min(day.end, maxT + padding),
-          day,
+          ...windowRange,
+          start: Math.max(windowRange.start, minT - padding),
+          end: Math.min(windowRange.end, maxT + padding),
         };
+      }
+
+      function timelineTickStep(hours) {
+        if (hours <= 4) return HOUR_MS;
+        if (hours <= 8) return 2 * HOUR_MS;
+        return 4 * HOUR_MS;
+      }
+
+      function timelineTicks(range) {
+        const step = timelineTickStep(range.hours || 24);
+        const first = Math.ceil(range.start / step) * step;
+        const ticks = [];
+        for (let tick = first; tick <= range.end; tick += step) {
+          ticks.push(tick);
+        }
+        return ticks;
+      }
+
+      function timeTickLabel(timestamp, range) {
+        const date = new Date(timestamp);
+        if ((range.hours || 24) >= 12 && date.getMinutes() === 0) {
+          return `${date.getHours()}\u70b9`;
+        }
+        return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
       }
 
       function bucketPoints(points, range, width) {
@@ -1167,6 +1236,28 @@
         button.setAttribute("aria-pressed", String(state.trimPeaks));
       }
 
+      function updateTimeRangeTabs() {
+        const tabs = $("timeRangeTabs");
+        tabs.innerHTML = TIMELINE_WINDOWS.map((hours) => {
+          const active = hours === state.timelineHours;
+          return `
+            <button class="time-tab ${active ? "active" : ""}" type="button" data-time-range="${hours}" role="tab" aria-selected="${active}">
+              ${hours}\u5c0f\u65f6
+            </button>
+          `;
+        }).join("");
+        tabs.querySelectorAll("[data-time-range]").forEach((button) => {
+          button.addEventListener("click", () => setTimelineHours(Number(button.dataset.timeRange)));
+        });
+      }
+
+      function setTimelineHours(hours) {
+        if (!TIMELINE_WINDOWS.includes(hours) || state.timelineHours === hours) return;
+        state.timelineHours = hours;
+        updateTimeRangeTabs();
+        drawChart();
+      }
+
       async function saveSelectedTarget(targetId) {
         const previous = state.selectedTarget;
         const requestedTarget = targetId || ALL_TARGETS;
@@ -1227,15 +1318,15 @@
         const pad = { left: 70, right: 28, top: 26, bottom: 86 };
         const w = rect.width - pad.left - pad.right;
         const h = rect.height - pad.top - pad.bottom;
-        const day = dayRange(data.generated_at);
+        const timeWindow = timelineWindow(data.generated_at);
         const rawLines = visibleSeries(data)
           .map((line) => ({
             ...line,
-            points: trimPeakPoints(line.points.filter((point) => point.t >= day.start && point.t <= day.end)),
+            points: trimPeakPoints(line.points.filter((point) => point.t >= timeWindow.start && point.t <= timeWindow.end)),
           }))
           .filter((line) => line.points.length);
         const rawPoints = rawLines.flatMap((line) => line.points);
-        const range = chartRange(rawPoints, day);
+        const range = chartRange(rawPoints, timeWindow);
         const lines = rawLines
           .map((line) => ({
             ...line,
@@ -1284,11 +1375,10 @@
         }
         ctx.strokeStyle = "rgba(255,255,255,0.16)";
         ctx.strokeRect(pad.left, pad.top, w, h);
-        for (let hour = 0; hour <= 24; hour += 4) {
-          const hourTime = day.start + hour * 60 * 60 * 1000;
-          if (hourTime < range.start || hourTime > range.end) continue;
-          const x = pad.left + ((hourTime - range.start) / (range.end - range.start)) * w;
-          ctx.strokeStyle = hour % 8 === 0
+        timelineTicks(range).forEach((tick) => {
+          const x = pad.left + ((tick - range.start) / (range.end - range.start)) * w;
+          const date = new Date(tick);
+          ctx.strokeStyle = date.getHours() % 8 === 0
             ? "rgba(255,255,255,0.13)"
             : "rgba(255,255,255,0.07)";
           ctx.beginPath();
@@ -1296,11 +1386,11 @@
           ctx.lineTo(x, pad.top + h);
           ctx.stroke();
           ctx.fillStyle = "rgba(147,160,163,0.9)";
-          const label = `${hour}\u70b9`;
+          const label = timeTickLabel(tick, range);
           const labelWidth = ctx.measureText(label).width;
           const labelX = Math.max(6, Math.min(rect.width - labelWidth - 6, x - labelWidth / 2));
           ctx.fillText(label, labelX, pad.top + h + 22);
-        }
+        });
         const startLabel = new Date(range.start).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
         const endLabel = new Date(range.end).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
         ctx.fillStyle = "rgba(147,160,163,0.88)";
@@ -1735,6 +1825,7 @@
 
       setClock();
       updatePeakButton();
+      updateTimeRangeTabs();
       setInterval(setClock, 1000);
       initAuth();
       loadSnapshot();
