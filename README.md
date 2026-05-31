@@ -1,5 +1,9 @@
 # kkProbe
 
+## Dashboard Preview
+
+![kkProbe dashboard](docs/dashboard.png)
+
 轻量 VPS 延迟探针面板。中心 VPS 只负责展示和管理，其它 VPS 可以只部署探针，不需要前端页面。
 
 ## 功能

@@ -10,7 +10,11 @@
         --bg: #090b0f;
         --panel: rgba(18, 22, 28, 0.82);
         --panel-strong: rgba(24, 29, 36, 0.96);
+        --surface: rgba(15, 19, 24, 0.88);
+        --surface-soft: rgba(255, 255, 255, 0.055);
+        --surface-faint: rgba(255, 255, 255, 0.028);
         --line: rgba(255, 255, 255, 0.12);
+        --line-strong: rgba(255, 255, 255, 0.18);
         --text: #eef2f0;
         --muted: #93a0a3;
         --green: #40d98a;
@@ -29,9 +33,9 @@
         margin: 0;
         min-height: 100vh;
         background:
-          linear-gradient(rgba(255,255,255,0.035) 1px, transparent 1px),
-          linear-gradient(90deg, rgba(255,255,255,0.035) 1px, transparent 1px),
-          linear-gradient(135deg, #090b0f 0%, #111613 42%, #171218 100%);
+          linear-gradient(rgba(255,255,255,0.026) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255,255,255,0.026) 1px, transparent 1px),
+          linear-gradient(135deg, #080b0f 0%, #0d1412 46%, #151117 100%);
         background-size: 42px 42px, 42px 42px, auto;
         color: var(--text);
         font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -45,17 +49,17 @@
         pointer-events: none;
         background: repeating-linear-gradient(
           180deg,
-          rgba(255,255,255,0.03) 0,
-          rgba(255,255,255,0.03) 1px,
+          rgba(255,255,255,0.018) 0,
+          rgba(255,255,255,0.018) 1px,
           transparent 1px,
           transparent 7px
         );
         mix-blend-mode: screen;
-        opacity: 0.3;
+        opacity: 0.22;
       }
 
       .shell {
-        width: min(1400px, calc(100% - 32px));
+        width: min(1500px, calc(100% - 32px));
         margin: 0 auto;
         padding: 24px 0 32px;
       }
@@ -106,25 +110,38 @@
         display: grid;
         grid-template-columns: repeat(4, minmax(0, 1fr));
         gap: 12px;
-        margin-bottom: 12px;
+        margin-bottom: 18px;
       }
 
       .metric,
       .node-card,
       .target-row {
+        position: relative;
+        overflow: hidden;
         border: 1px solid var(--line);
         border-radius: var(--radius);
-        background: var(--panel);
-        box-shadow: 0 14px 38px rgba(0,0,0,0.28);
+        background:
+          linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.012)),
+          var(--surface);
+        box-shadow: 0 14px 38px rgba(0,0,0,0.24);
         backdrop-filter: blur(18px);
       }
 
       .metric {
-        min-height: 94px;
-        padding: 14px;
+        min-height: 102px;
+        padding: 16px 16px 14px;
         display: flex;
         flex-direction: column;
         justify-content: space-between;
+      }
+
+      .metric::before {
+        content: "";
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: 3px;
+        background: linear-gradient(180deg, var(--green), rgba(64, 199, 216, 0.52));
+        opacity: 0.85;
       }
 
       .metric .label {
@@ -133,8 +150,9 @@
       }
 
       .metric .value {
-        font-size: 27px;
+        font-size: 30px;
         font-weight: 780;
+        line-height: 1;
       }
 
       .metric .hint {
@@ -148,7 +166,7 @@
       .layout {
         display: grid;
         grid-template-columns: 1fr;
-        gap: 18px;
+        gap: 22px;
       }
 
       .panel {
@@ -168,6 +186,7 @@
         margin: 0;
         font-size: 16px;
         font-weight: 720;
+        letter-spacing: 0;
       }
 
       .toolbar {
@@ -211,11 +230,16 @@
       button {
         padding: 0 12px;
         cursor: pointer;
+        transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease, transform 0.18s ease;
       }
 
       button:hover,
       select:hover {
         border-color: rgba(64, 217, 138, 0.55);
+      }
+
+      button:active {
+        transform: translateY(1px);
       }
 
       .primary {
@@ -236,7 +260,7 @@
         padding: 4px;
         border: 1px solid var(--line);
         border-radius: 6px;
-        background: rgba(255,255,255,0.055);
+        background: var(--surface-soft);
       }
 
       .time-tab {
@@ -318,13 +342,23 @@
 
       .chart-wrap {
         position: relative;
-        height: 620px;
-        border: 1px solid rgba(255,255,255,0.08);
+        height: clamp(620px, 68vh, 780px);
+        border: 1px solid rgba(255,255,255,0.1);
         border-radius: var(--radius);
         background:
-          linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01)),
-          rgba(3,5,7,0.52);
+          linear-gradient(180deg, rgba(64, 217, 138, 0.055), transparent 38%),
+          linear-gradient(180deg, rgba(255,255,255,0.032), rgba(255,255,255,0.008)),
+          rgba(3,5,7,0.64);
         overflow: hidden;
+      }
+
+      .chart-wrap::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        background: linear-gradient(90deg, rgba(64,217,138,0.045), transparent 18%, transparent 82%, rgba(64,199,216,0.04));
+        z-index: 0;
       }
 
       .chart-legend {
@@ -339,6 +373,7 @@
         pointer-events: none;
         font-size: 11px;
         color: rgba(238, 242, 240, 0.78);
+        z-index: 2;
       }
 
       .legend-item {
@@ -347,6 +382,12 @@
         gap: 6px;
         max-width: 240px;
         min-width: 0;
+        min-height: 20px;
+        padding: 2px 7px;
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 999px;
+        background: rgba(6, 9, 12, 0.58);
+        backdrop-filter: blur(10px);
       }
 
       .legend-swatch {
@@ -365,6 +406,8 @@
       }
 
       #chart {
+        position: relative;
+        z-index: 1;
         width: 100%;
         height: 100%;
         display: block;
@@ -377,6 +420,8 @@
         background: linear-gradient(180deg, transparent, rgba(64, 217, 138, 0.08), transparent);
         height: 120px;
         animation: scan 4.8s linear infinite;
+        opacity: 0.5;
+        z-index: 2;
       }
 
       @keyframes scan {
@@ -386,12 +431,22 @@
 
       .nodes {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-        gap: 10px;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 12px;
       }
 
       .node-card {
-        padding: 13px;
+        padding: 14px 14px 13px 17px;
+      }
+
+      .node-card::before {
+        content: "";
+        position: absolute;
+        inset: 12px auto 12px 0;
+        width: 3px;
+        border-radius: 999px;
+        background: var(--node-color, var(--green));
+        box-shadow: 0 0 18px var(--node-color, var(--green));
       }
 
       .node-top {
@@ -427,6 +482,7 @@
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+        color: var(--node-color, var(--green));
       }
 
       .badge {
@@ -453,6 +509,7 @@
         color: var(--muted);
         margin-top: 6px;
         font-size: 12px;
+        line-height: 1.25;
       }
 
       .bar {
@@ -474,16 +531,32 @@
 
       .targets {
         display: grid;
-        gap: 8px;
+        gap: 9px;
         margin-top: 12px;
       }
 
       .target-row {
         display: grid;
-        grid-template-columns: minmax(130px, 1fr) 76px 84px 80px 220px;
-        gap: 10px;
+        grid-template-columns: minmax(150px, 1fr) 76px 92px 86px 230px;
+        gap: 12px;
         align-items: center;
-        padding: 10px 12px;
+        padding: 12px 14px;
+      }
+
+      .target-row.selected {
+        border-color: rgba(64, 217, 138, 0.42);
+        background:
+          linear-gradient(90deg, rgba(64,217,138,0.12), transparent 32%),
+          linear-gradient(180deg, rgba(255,255,255,0.046), rgba(255,255,255,0.014)),
+          var(--surface);
+      }
+
+      .target-row.selected::before {
+        content: "";
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: 3px;
+        background: var(--green);
       }
 
       .target-row span {
@@ -986,6 +1059,12 @@
         return colors[index % colors.length];
       }
 
+      function chartLineAlpha(index, total) {
+        if (total <= 3) return 0.96;
+        if (total <= 6) return index < 2 ? 0.9 : 0.74;
+        return index < 3 ? 0.86 : 0.58;
+      }
+
       function visibleTargets(targets) {
         if (state.selectedTarget === ALL_TARGETS) return targets;
         return targets.filter((target) => target.id === state.selectedTarget);
@@ -1434,10 +1513,14 @@
           const points = line.points;
           if (!points.length) return;
           const color = lineColor(index);
+          const alpha = chartLineAlpha(index, lines.length);
           ctx.strokeStyle = color;
           ctx.lineWidth = 2.5;
+          ctx.lineCap = "round";
+          ctx.lineJoin = "round";
+          ctx.globalAlpha = chartLineAlpha(index, lines.length);
           ctx.shadowColor = color;
-          ctx.shadowBlur = 9;
+          ctx.shadowBlur = lines.length > 5 ? 5 : 9;
           ctx.beginPath();
           points.forEach((point, pointIndex) => {
             const x = xFor(point.t);
@@ -1450,14 +1533,18 @@
 
           const last = points[points.length - 1];
           ctx.fillStyle = color;
-          points.forEach((point) => {
+          const pointStep = Math.max(1, Math.ceil(points.length / 420));
+          points.forEach((point, pointIndex) => {
+            if (pointIndex % pointStep !== 0 && point !== last) return;
             ctx.beginPath();
-            ctx.arc(xFor(point.t), yFor(point.latency_ms), 2.4, 0, Math.PI * 2);
+            ctx.arc(xFor(point.t), yFor(point.latency_ms), lines.length > 5 ? 1.8 : 2.4, 0, Math.PI * 2);
             ctx.fill();
           });
+          ctx.globalAlpha = Math.min(1, alpha + 0.12);
           ctx.beginPath();
           ctx.arc(xFor(last.t), yFor(last.latency_ms), 4.2, 0, Math.PI * 2);
           ctx.fill();
+          ctx.globalAlpha = 1;
         });
       }
 
@@ -1496,9 +1583,9 @@
             ? `worst ${fmtLatency(latency)}`
             : fmtLatency(latency);
           return `
-            <div class="node-card">
+            <div class="node-card" style="--node-color:${lineColor(index)}">
               <div class="node-top">
-                <div class="node-name" style="color:${lineColor(index)}">${node.name || node.id}</div>
+                <div class="node-name">${node.name || node.id}</div>
                 <div class="node-actions">
                   <button class="node-edit" type="button" data-edit-node="${node.id}">Edit</button>
                   ${index > 0 ? `<button class="node-delete" type="button" data-delete-node="${node.id}">Delete</button>` : ""}
@@ -1531,8 +1618,9 @@
           const values = nodes.map((node) => latestFor(node, target.id)).filter((v) => v !== null);
           const avg = values.length ? values.reduce((a, b) => a + b, 0) / values.length : null;
           const assignedCount = nodes.filter((node) => nodeHasTarget(node, target.id)).length;
+          const selected = state.selectedTarget === target.id;
           return `
-            <div class="target-row">
+            <div class="target-row ${selected ? "selected" : ""}">
               <span>${target.name}</span>
               <span class="muted">${target.kind}</span>
               <span class="muted">${assignedCount}/${nodes.length} VPS</span>
